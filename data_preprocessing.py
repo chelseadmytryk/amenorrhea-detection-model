@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Create one daily feature CSV per participant ID from mcPHASES tables.
+Create one daily feature CSV per participant ID and study interval from mcPHASES tables.
 
-Outputs one CSV per ID with one row per day containing:
+Outputs one CSV per (ID, study_interval) with one row per day containing:
 1. RMSSD averaged across available HRV entries for that day
 2. Resting heart rate (RHR)
 3. Normalized nightly temperature deviation:
@@ -92,7 +92,6 @@ require_columns(
     "resting_heart_rate.csv"
 )
 rhr = safe_numeric(rhr, ["id", "study_interval", "day_in_study", "value", "error"])
-# Treat 0 as missing, since 0 bpm is not physiologically valid here
 rhr.loc[rhr["value"] == 0, "value"] = np.nan
 rhr_daily = (
     rhr[["id", "study_interval", "day_in_study", "value"]]
@@ -233,9 +232,8 @@ merged = merged.merge(
 
 merged = merged.sort_values(["id", "study_interval", "day_in_study"]).reset_index(drop=True)
 
-
 # =========================
-# Identify IDs with missing entire features
+# Identify (ID, study_interval) groups with missing entire features
 # =========================
 features = [
     "rmssd_avg",
@@ -245,18 +243,20 @@ features = [
     "activity_intensity",
 ]
 
-ids_to_ignore = set()
+groups_to_ignore = set()
 
-for participant_id, df_id in merged.groupby("id"):
+for (participant_id, study_interval), df_group in merged.groupby(["id", "study_interval"]):
     for feature in features:
-        if df_id[feature].isna().all():
-            print(f"ID {int(participant_id)} has NO data for {feature}")
-            ids_to_ignore.add(participant_id)
-            break  # no need to check other features
-
+        if df_group[feature].isna().all():
+            print(
+                f"ID {int(participant_id)}, study_interval {int(study_interval)} "
+                f"has NO data for {feature}"
+            )
+            groups_to_ignore.add((participant_id, study_interval))
+            break
 
 # =========================
-# Write one CSV per ID
+# Write one CSV per ID per study_interval
 # =========================
 feature_cols = [
     "study_interval",
@@ -270,17 +270,17 @@ feature_cols = [
 
 written_count = 0
 
-for participant_id, df_id in merged.groupby("id"):
-    if participant_id in ids_to_ignore:
-        continue  # skip bad IDs
+for (participant_id, study_interval), df_group in merged.groupby(["id", "study_interval"]):
+    if (participant_id, study_interval) in groups_to_ignore:
+        continue
 
-    out_path = OUTPUT_DIR / f"id_{int(participant_id)}_daily_features.csv"
-    df_out = df_id[["id"] + feature_cols].copy()
+    out_path = OUTPUT_DIR / f"id_{int(participant_id)}_study_interval_{int(study_interval)}_daily_features.csv"
+    df_out = df_group[["id"] + feature_cols].copy()
     df_out.to_csv(out_path, index=False)
     written_count += 1
 
-
-# print(f"Done. Wrote {merged['id'].nunique()} files to: {OUTPUT_DIR.resolve()}")
-
-print(f"\nIDs ignored: {sorted([int(i) for i in ids_to_ignore])}")
+print(
+    "\nID/study_interval groups ignored: "
+    f"{[(int(i), int(s)) for i, s in sorted(groups_to_ignore)]}"
+)
 print(f"Done. Wrote {written_count} files to: {OUTPUT_DIR.resolve()}")
