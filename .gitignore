@@ -207,3 +207,4 @@ marimo/_lsp/
 __marimo__/
 .DS_Store
 per_id_daily_features/
+kalman_filtered/
