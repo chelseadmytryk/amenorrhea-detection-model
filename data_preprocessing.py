@@ -32,8 +32,8 @@ import numpy as np
 # =========================
 # Configuration
 # =========================
-INPUT_DIR = Path("/Users/natalietsang/Documents/DocumentsLocal/4B_ExtraFiles/MTE546/project/mcphases-a-dataset-of-physiological-hormonal-and-self-reported-events-and-symptoms-for-menstrual-health-tracking-with-wearables-1.0.0")
-OUTPUT_DIR = Path("/Users/natalietsang/Documents/DocumentsLocal/4B_ExtraFiles/MTE546/project/amenorrhea-detection-model/per_id_daily_features")
+INPUT_DIR = Path("/Users/chelseadmytryk/LocalFiles/mcphases/1.0.0")
+OUTPUT_DIR = Path("/Users/chelseadmytryk/LocalFiles/amenorrhea-detection-model/per_id_daily_features")
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 HRV_FILE = INPUT_DIR / "heart_rate_variability_details.csv"
