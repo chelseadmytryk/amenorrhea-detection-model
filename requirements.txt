@@ -2,3 +2,4 @@ pathlib
 pandas
 numpy
 matplotlib
+scipy

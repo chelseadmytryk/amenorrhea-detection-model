@@ -32,8 +32,8 @@ import numpy as np
 # =========================
 # Configuration
 # =========================
-INPUT_DIR = Path("/Users/chelseadmytryk/LocalFiles/mcphases/1.0.0")
-OUTPUT_DIR = Path("/Users/chelseadmytryk/LocalFiles/amenorrhea-detection-model/per_id_daily_features")
+INPUT_DIR = Path("/Users/natalietsang/Documents/DocumentsLocal/4B_ExtraFiles/MTE546/project/mcphases-a-dataset-of-physiological-hormonal-and-self-reported-events-and-symptoms-for-menstrual-health-tracking-with-wearables-1.0.0")
+OUTPUT_DIR = Path("/Users/natalietsang/Documents/DocumentsLocal/4B_ExtraFiles/MTE546/project/amenorrhea-detection-model/per_id_daily_features")
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 HRV_FILE = INPUT_DIR / "heart_rate_variability_details.csv"
@@ -94,7 +94,8 @@ require_columns(
 rhr = safe_numeric(rhr, ["id", "study_interval", "day_in_study", "value", "error"])
 rhr.loc[rhr["value"] == 0, "value"] = np.nan
 rhr_daily = (
-    rhr[["id", "study_interval", "day_in_study", "value"]]
+    rhr.groupby(["id", "study_interval", "day_in_study"], as_index=False)["value"]
+    .mean()
     .rename(columns={"value": "resting_heart_rate"})
 )
 
@@ -136,6 +137,9 @@ temp = safe_numeric(
 )
 temp["temp_dev_norm"] = (
     temp["baseline_relative_sample_sum"] / temp["temperature_samples"]
+)
+temp["temp_dev_norm"] = temp["temp_dev_norm"].where(
+    abs(temp["temp_dev_norm"]) <= 3.0, np.nan
 )
 temp_daily = (
     temp.groupby(["id", "study_interval", temp_day_col], as_index=False)["temp_dev_norm"]
