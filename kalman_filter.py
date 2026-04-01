@@ -18,7 +18,7 @@ class PhysiologicalKalmanFilter:
         
         # Control Matrix (Bd) [cite: 111]
         # s1-s6 map distance and intensity to physiological costs [cite: 112, 113, 114]
-        s1, s2, s3, s4, s5, s6 = 0.001, 0.002, 0.05, 0.1, 0.5, 1.0 # Tune these
+        s1, s2, s3, s4, s5, s6 = 0.001, 0.002, 0.05, 0.01, 0.001, 0.005 # Tune these
         self.Bd = np.array([
             [-s1, -s2], # HRV decrease [cite: 112]
             [s5, s6],   # RHR increase [cite: 113]
@@ -26,8 +26,8 @@ class PhysiologicalKalmanFilter:
             [0, 0]      # Rate not directly influenced [cite: 115]
         ])
         
-        self.Q = np.eye(4) * 0.01  # Process noise [cite: 24]
-        self.R = np.eye(3) * 0.1   # Measurement noise [cite: 31]
+        self.Q = np.eye(4) * 0.1  # Process noise [cite: 24]
+        self.R = np.eye(3) * 0.01   # Measurement noise [cite: 31]
         self.C = np.array([        # Observation matrix [cite: 30]
             [1, 0, 0, 0],
             [0, 1, 0, 0],
@@ -42,7 +42,8 @@ class PhysiologicalKalmanFilter:
 
     def update(self, z):
         # Update step (with support for missing data) [cite: 27, 118]
-        mask = ~np.isnan(z).flatten() # Omit missing elements [cite: 118, 119]
+        z = np.array(z).flatten()
+        mask = ~np.isnan(z) # Omit missing elements [cite: 118, 119]
         if not any(mask): return
         
         z_masked = z[mask].reshape(-1, 1)
@@ -82,15 +83,26 @@ for file_path in all_files:
     ])
     
     filtered_data = []
+    # Track the number of days since the last valid sensor update
+    days_since_update = 0
+    max_gap = 5 # Stop predicting if no data for 5 days
+
     for _, row in df.iterrows():
-        # Predict [cite: 19]
         u = [row['daily_distance'] / 1000.0, row['activity_intensity']] #[cite: 87, 108]
-        kf.predict(u)
+        z = [row['rmssd_avg'], row['resting_heart_rate'], row['temp_dev_norm']]
         
-        # Update [cite: 27]
-        z = np.array([row['rmssd_avg'], row['resting_heart_rate'], row['temp_dev_norm']]).reshape(3, 1)
         if not np.isnan(z).all():
+            # Valid data found: Reset counter and run full Filter
+            days_since_update = 0
+            kf.predict(u)
             kf.update(z)
+        elif days_since_update < max_gap:
+            # No data but within threshold: Run Predict Step only [cite: 17, 119]
+            kf.predict(u)
+            days_since_update += 1
+        else:
+            # Gap too large: Stop updating state to prevent divergence
+            pass 
         
         filtered_data.append(kf.x.flatten())
     
