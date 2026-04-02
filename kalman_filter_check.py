@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 
 # Path to your successfully filtered ID 6 file
-FILTERED_FILE = Path("/Users/natalietsang/Documents/DocumentsLocal/4B_ExtraFiles/MTE546/project/amenorrhea-detection-model/kalman_filtered/id_10_study_interval_2024_daily_features.csv")
+FILTERED_FILE = Path("/Users/natalietsang/Documents/DocumentsLocal/4B_ExtraFiles/MTE546/project/amenorrhea-detection-model/kalman_filtered_Risky/id_210_daily_features.csv")
 
 df = pd.read_csv(FILTERED_FILE)
 
