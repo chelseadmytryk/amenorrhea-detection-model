@@ -184,7 +184,7 @@ def evaluate_split(split: dict, split_num: int) -> dict:
                 df['risk_prob']  = df.apply(lambda r: compute_risk_prob(r, params), axis=1)
                 df['risk_level'] = df['risk_prob'].apply(classify_two_way)
 
-                mean_prob   = df['risk_prob'].mean()
+                mean_prob = df['risk_prob'].iloc[7:].mean()
                 pred_class  = classify_two_way(mean_prob)
                 pred_binary = 0 if pred_class == 'Green' else 1
 

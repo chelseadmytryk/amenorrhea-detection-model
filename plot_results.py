@@ -5,7 +5,7 @@ from pathlib import Path
 # --- CONFIG ---
 RESULTS_DIR = Path("/Users/natalietsang/Documents/DocumentsLocal/4B_ExtraFiles/MTE546/project/amenorrhea-detection-model/bayesian_risk_results/split2")
 # Pick a participant to visualize (e.g., an augmented one to see the trend)
-PARTICIPANT_ID = "id_10_study_interval_2022_daily_features.csv" 
+PARTICIPANT_ID = "id_208_daily_features.csv" 
 
 def plot_participant_risk(file_path):
     df = pd.read_csv(file_path)
