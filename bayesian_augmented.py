@@ -122,6 +122,7 @@ def compute_risk_prob(row, params: dict, prior: float = PRIOR) -> float:
         val = row[feat]
         if pd.isna(val):
             continue
+        # mean -> is mu; and 
         log_p_risk += norm.logpdf(val, params[feat]['mean_r'], params[feat]['std_r']) # Calculating Gaussian Likelihood for each feature, uses log-probabilities to avoid num overflow
         log_p_norm += norm.logpdf(val, params[feat]['mean_n'], params[feat]['std_n'])
 
