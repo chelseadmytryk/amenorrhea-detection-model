@@ -2,7 +2,7 @@ import pandas as pd
 import numpy as np
 import random
 
-INPUT_CSV = "hormones_and_selfreport.csv"
+INPUT_CSV = "/Users/natalietsang/Documents/DocumentsLocal/4B_ExtraFiles/MTE546/project/mcphases-a-dataset-of-physiological-hormonal-and-self-reported-events-and-symptoms-for-menstrual-health-tracking-with-wearables-1.0.0/hormones_and_selfreport.csv"
 OUTPUT_NOTES_CSV = "participant_risk_notes.csv"
 OUTPUT_SPLITS_TXT = "evaluation_splits_readable_v3.txt"
 
