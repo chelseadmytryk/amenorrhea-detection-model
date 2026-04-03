@@ -24,7 +24,6 @@ from sklearn.metrics import classification_report, confusion_matrix
 BASE_PATH          = Path("/Users/natalietsang/Documents/DocumentsLocal/4B_ExtraFiles/MTE546/project/amenorrhea-detection-model")
 ORIGINAL_FILTERED  = BASE_PATH / "kalman_filtered"
 AUGMENTED_FILTERED = BASE_PATH / "kalman_filtered_Risky"
-INTERVAL_LABELS    = BASE_PATH / "interval_risk_labels.csv"
 SPLITS_FILE        = BASE_PATH / "evaluation_splits_readable_v3.txt"
 OUTPUT_DIR         = BASE_PATH / "bayesian_risk_results"
 OUTPUT_DIR.mkdir(exist_ok=True)
@@ -41,29 +40,22 @@ CLASS_ORDER   = ['Low', 'High']
 # =========================
 # Step 1: Load ground truth labels
 # =========================
-def load_labels(labels_path: Path) -> pd.DataFrame:
-    df = pd.read_csv(labels_path)
-    df['risk_class'] = df['interval_risk'].map(RISK_TO_CLASS)
-    return df
-
-
-def get_label_for_file(filename: str, labels_df: pd.DataFrame):
-    """Return (binary_label, three_class_label) for a given filename."""
-    m = re.search(r'id_(\d+)_study_interval_(\d+)_', filename)
+def get_ground_truth(filename: str):
+    """
+    Directly determines label based on Participant ID.
+    IDs >= 200: High Risk (1)
+    IDs < 200: Low Risk (0)
+    """
+    m = re.search(r'id_(\d+)_', filename)
     if not m:
         return None, None
-    pid  = int(m.group(1))
-    year = int(m.group(2))  # 2022 or 2024
-
-    row = labels_df[
-        (labels_df['id'] == pid) &
-        (labels_df['study_interval'] == year)
-    ]
-    if row.empty:
-        return None, None
-
-    return int(row.iloc[0]['label']), row.iloc[0]['risk_class']
-
+    
+    pid = int(m.group(1))
+    
+    if pid >= 200:
+        return 1, 'High'
+    else:
+        return 0, 'Low'
 
 # =========================
 # Step 2: Parse evaluation splits
@@ -75,8 +67,8 @@ def parse_splits(splits_path: Path) -> list:
 
     blocks = re.split(r'=== SPLIT \d+ ===', content)[1:]
     for block in blocks:
-        train_match = re.search(r'TRAIN:.*?ids:\s*([\d,\s]+)', block, re.DOTALL)
-        test_match  = re.search(r'TEST:.*?ids:\s*([\d,\s]+)',  block, re.DOTALL)
+        train_match = re.search(r'TRAIN:.*?all_ids_with_augmented:\s*([\d,\s]+)', block, re.DOTALL)
+        test_match  = re.search(r'TEST:.*?all_ids_with_augmented:\s*([\d,\s]+)',  block, re.DOTALL)
         if train_match and test_match:
             splits.append({
                 'train': [int(x.strip()) for x in train_match.group(1).split(',') if x.strip()],
@@ -88,23 +80,20 @@ def parse_splits(splits_path: Path) -> list:
 # =========================
 # Step 3: Build training data pool for a given split
 # =========================
-def build_train_pool(train_ids: list, labels_df: pd.DataFrame) -> pd.DataFrame:
+def build_train_pool(train_ids: list) -> pd.DataFrame:
     rows = []
-
     for pid in train_ids:
-        # Check both original and augmented filtered folders
+        # Search both original and augmented folders
         for folder in [ORIGINAL_FILTERED, AUGMENTED_FILTERED]:
-            for f in folder.glob(f"id_{pid}_study_interval_*_daily_features.csv"):
-                binary_label, _ = get_label_for_file(f.name, labels_df)
-                if binary_label is None:
-                    continue
-                df = pd.read_csv(f)
-                df['label'] = binary_label
-                rows.append(df)
-
-    if not rows:
-        return pd.DataFrame()
-    return pd.concat(rows, ignore_index=True)
+            for f in folder.glob(f"id_{pid}_*.csv"):
+                # LOGIC: Include if it's augmented (>=200) OR if it's the 2022 interval
+                if pid >= 200 or "study_interval_2022" in f.name:
+                    binary_label, _ = get_ground_truth(f.name)
+                    df = pd.read_csv(f)
+                    df['label'] = binary_label
+                    rows.append(df)
+                    
+    return pd.concat(rows, ignore_index=True) if rows else pd.DataFrame()
 
 # =========================
 # Step 4: Estimate likelihood parameters from training data
@@ -133,10 +122,11 @@ def compute_risk_prob(row, params: dict, prior: float = PRIOR) -> float:
         val = row[feat]
         if pd.isna(val):
             continue
-        log_p_risk += norm.logpdf(val, params[feat]['mean_r'], params[feat]['std_r'])
+        log_p_risk += norm.logpdf(val, params[feat]['mean_r'], params[feat]['std_r']) # Calculating Gaussian Likelihood for each feature, uses log-probabilities to avoid num overflow
         log_p_norm += norm.logpdf(val, params[feat]['mean_n'], params[feat]['std_n'])
 
     try:
+        # This is the BAYES Theorem: Posterior P(Risk|x_k)
         return 1.0 / (1.0 + np.exp(log_p_norm - log_p_risk))
     except OverflowError:
         return 0.0 if log_p_norm > log_p_risk else 1.0
@@ -148,14 +138,14 @@ def classify_two_way(prob: float) -> str:
 # =========================
 # Step 6: Evaluate one split
 # =========================
-def evaluate_split(split: dict, labels_df: pd.DataFrame, split_num: int) -> dict:
+def evaluate_split(split: dict, split_num: int) -> dict:
     print(f"\n{'='*55}")
     print(f"SPLIT {split_num}  |  train={len(split['train'])} participants  "
           f"test={len(split['test'])} participants")
     print(f"{'='*55}")
 
     # Estimate parameters from training data only
-    train_df = build_train_pool(split['train'], labels_df)
+    train_df = build_train_pool(split['train'])
     if train_df.empty:
         print("  WARNING: empty training pool, skipping split")
         return {}
@@ -178,8 +168,14 @@ def evaluate_split(split: dict, labels_df: pd.DataFrame, split_num: int) -> dict
 
     for pid in split['test']:
         for folder in [ORIGINAL_FILTERED, AUGMENTED_FILTERED]:
-            for f in folder.glob(f"id_{pid}_study_interval_*_daily_features.csv"):
-                binary_label, true_class = get_label_for_file(f.name, labels_df)
+            for f in folder.glob(f"id_{pid}_*.csv"):
+                
+                # THE 2022 FILTER:
+                # Skip real participants' 2024 data
+                if pid < 200 and "study_interval_2024" in f.name:
+                    continue
+
+                binary_label, true_class = get_ground_truth(f.name)
                 if binary_label is None:
                     continue
 
@@ -246,25 +242,26 @@ def evaluate_split(split: dict, labels_df: pd.DataFrame, split_num: int) -> dict
 # Main
 # =========================
 if __name__ == "__main__":
-    print("=== Bayesian Amenorrhea Risk Model — Three-Class Evaluation ===")
+    print("=== Bayesian Amenorrhea Risk Model — ID-Based Evaluation ===")
+    print("Logic: IDs >= 200 are 'High Risk' (Augmented), IDs < 200 are 'Low Risk' (Original)")
 
-    labels_df = load_labels(INTERVAL_LABELS)
-    print(f"\nLoaded {len(labels_df)} interval labels")
-    print(f"Distribution: {labels_df['interval_risk'].value_counts().to_dict()}")
-
+    # 1. Load your evaluation splits (which contain the ID lists)
     splits = parse_splits(SPLITS_FILE)
-    print(f"Loaded {len(splits)} evaluation splits")
+    print(f"Loaded {len(splits)} evaluation splits from {SPLITS_FILE.name}")
 
     all_results = []
+    
+    # 2. Iterate through splits
     for i, split in enumerate(splits, 1):
-        result = evaluate_split(split, labels_df, i)
+        # We no longer pass labels_df here!
+        result = evaluate_split(split, i) 
         if result:
             all_results.append(result)
 
-    # Aggregate across all splits
+    # 3. Aggregate results (keep the rest of your aggregation logic the same)
     if all_results:
         print(f"\n{'='*55}")
-        print("AGGREGATED RESULTS ACROSS ALL SPLITS")
+        print("FINAL AGGREGATED RESULTS (ID-BASED GROUND TRUTH)")
         print(f"{'='*55}")
 
         all_true_class  = [y for r in all_results for y in r['y_true_class']]
