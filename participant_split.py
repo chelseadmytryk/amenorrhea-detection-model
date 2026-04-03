@@ -1,10 +1,16 @@
 import pandas as pd
 import numpy as np
 import random
+from pathlib import Path
 
 INPUT_CSV = "/Users/natalietsang/Documents/DocumentsLocal/4B_ExtraFiles/MTE546/project/mcphases-a-dataset-of-physiological-hormonal-and-self-reported-events-and-symptoms-for-menstrual-health-tracking-with-wearables-1.0.0/hormones_and_selfreport.csv"
 OUTPUT_NOTES_CSV = "participant_risk_notes.csv"
 OUTPUT_SPLITS_TXT = "evaluation_splits_readable_v3.txt"
+OUTPUT_SPLIT_MEMBERSHIP_CSV = "split_membership.csv"
+
+# folder with files like id_201_daily_features.csv, id_202_daily_features.csv, etc.
+AUGMENTED_DATA_DIR = Path("augmented_data")
+SYNTHETIC_OFFSET = 200
 
 BLEEDING_MAP = {
     "Not at all": 0,
@@ -152,15 +158,15 @@ def classify_interval(sub):
     elif hormone_support == "unknown":
         short_reasons.append("PdG unavailable")
 
-    # ONLY low or medium
+    # only low or medium
     if low_points >= 3 and high_points <= 1:
         risk = "low"
     else:
         risk = "medium"
 
     return {
-        "id": sub["id"].iloc[0],
-        "study_interval": sub["study_interval"].iloc[0],
+        "id": int(sub["id"].iloc[0]),
+        "study_interval": int(sub["study_interval"].iloc[0]),
         "interval_risk": risk,
         "reason_note": ", ".join(short_reasons),
     }
@@ -171,7 +177,6 @@ def aggregate_subject_notes(interval_df):
     for participant_id, sub in interval_df.groupby("id", sort=True):
         interval_risks = sub["interval_risk"].tolist()
 
-        # ONLY low or medium
         if all(r == "low" for r in interval_risks):
             final_risk = "low"
         else:
@@ -183,7 +188,7 @@ def aggregate_subject_notes(interval_df):
         ]
 
         rows.append({
-            "participant_id": participant_id,
+            "participant_id": int(participant_id),
             "risk_level": final_risk,
             "reason_note": " | ".join(interval_notes)
         })
@@ -198,16 +203,66 @@ def count_risk_levels(df_subset):
     }
 
 
-def write_readable_splits(subject_df, filename):
+def filter_to_2022(df):
+    return df[df["study_interval"] == 2022].copy()
+
+
+def get_augmented_id_map(aug_dir, synthetic_offset=200):
+    """
+    Returns:
+      real_to_synthetic: {real_id: [synthetic_ids]}
+      synthetic_ids_found: sorted list of all synthetic ids found
+    """
+    real_to_synthetic = {}
+
+    if not aug_dir.exists():
+        print(f"Warning: augmented data directory not found: {aug_dir.resolve()}")
+        return real_to_synthetic, []
+
+    for file_path in aug_dir.glob("id_*_daily_features.csv"):
+        try:
+            synthetic_id = int(file_path.name.split("_")[1])
+            real_id = synthetic_id - synthetic_offset
+
+            if real_id <= 0:
+                continue
+
+            real_to_synthetic.setdefault(real_id, []).append(synthetic_id)
+        except (IndexError, ValueError):
+            print(f"Skipping unrecognized augmented filename: {file_path.name}")
+
+    for real_id in real_to_synthetic:
+        real_to_synthetic[real_id] = sorted(real_to_synthetic[real_id])
+
+    synthetic_ids_found = sorted(
+        synthetic_id
+        for synthetic_list in real_to_synthetic.values()
+        for synthetic_id in synthetic_list
+    )
+
+    return real_to_synthetic, synthetic_ids_found
+
+
+def expand_split_with_augmented_ids(real_ids, real_to_synthetic):
+    expanded_ids = []
+    for real_id in sorted(real_ids):
+        expanded_ids.append(real_id)
+        expanded_ids.extend(real_to_synthetic.get(real_id, []))
+    return sorted(expanded_ids)
+
+
+def write_readable_splits(subject_df, filename, aug_dir=AUGMENTED_DATA_DIR):
     rng = random.Random(RANDOM_SEED)
 
     low_ids = sorted(subject_df.loc[subject_df["risk_level"] == "low", "participant_id"].tolist())
     medium_ids = sorted(subject_df.loc[subject_df["risk_level"] == "medium", "participant_id"].tolist())
-    all_ids = sorted(subject_df["participant_id"].tolist())
+    all_real_ids = sorted(subject_df["participant_id"].tolist())
+
+    real_to_synthetic, synthetic_ids_found = get_augmented_id_map(aug_dir, SYNTHETIC_OFFSET)
 
     with open(filename, "w") as f:
         for split in range(1, N_SPLITS + 1):
-            test_ids = []
+            test_real_ids = []
 
             for group_ids in [low_ids, medium_ids]:
                 ids_copy = group_ids[:]
@@ -218,46 +273,137 @@ def write_readable_splits(subject_df, filename):
                 else:
                     n_test = max(1, int(len(ids_copy) * TEST_FRACTION))
 
-                test_ids.extend(ids_copy[:n_test])
+                test_real_ids.extend(ids_copy[:n_test])
 
-            test_ids = sorted(set(test_ids))
-            train_ids = sorted([x for x in all_ids if x not in test_ids])
+            test_real_ids = sorted(set(test_real_ids))
+            train_real_ids = sorted([x for x in all_real_ids if x not in test_real_ids])
 
-            train_df = subject_df[subject_df["participant_id"].isin(train_ids)]
-            test_df = subject_df[subject_df["participant_id"].isin(test_ids)]
+            train_df = subject_df[subject_df["participant_id"].isin(train_real_ids)]
+            test_df = subject_df[subject_df["participant_id"].isin(test_real_ids)]
 
             train_counts = count_risk_levels(train_df)
             test_counts = count_risk_levels(test_df)
 
+            train_all_ids = expand_split_with_augmented_ids(train_real_ids, real_to_synthetic)
+            test_all_ids = expand_split_with_augmented_ids(test_real_ids, real_to_synthetic)
+
+            train_synth_count = sum(len(real_to_synthetic.get(rid, [])) for rid in train_real_ids)
+            test_synth_count = sum(len(real_to_synthetic.get(rid, [])) for rid in test_real_ids)
+
             f.write(f"=== SPLIT {split} ===\n")
 
             f.write("TRAIN:\n")
-            f.write(f"  n_participants: {len(train_ids)}\n")
+            f.write(f"  n_real_participants: {len(train_real_ids)}\n")
+            f.write(f"  n_augmented_participants: {train_synth_count}\n")
+            f.write(f"  n_total_with_augmented: {len(train_all_ids)}\n")
             f.write(
-                f"  distribution: low={train_counts['low']}, "
+                f"  real_distribution: low={train_counts['low']}, "
                 f"medium={train_counts['medium']}\n"
             )
-            f.write(f"  ids: {', '.join(map(str, train_ids))}\n\n")
+            f.write(f"  real_ids: {', '.join(map(str, train_real_ids))}\n")
+            f.write(f"  all_ids_with_augmented: {', '.join(map(str, train_all_ids))}\n\n")
 
             f.write("TEST:\n")
-            f.write(f"  n_participants: {len(test_ids)}\n")
+            f.write(f"  n_real_participants: {len(test_real_ids)}\n")
+            f.write(f"  n_augmented_participants: {test_synth_count}\n")
+            f.write(f"  n_total_with_augmented: {len(test_all_ids)}\n")
             f.write(
-                f"  distribution: low={test_counts['low']}, "
+                f"  real_distribution: low={test_counts['low']}, "
                 f"medium={test_counts['medium']}\n"
             )
-            f.write(f"  ids: {', '.join(map(str, test_ids))}\n\n")
+            f.write(f"  real_ids: {', '.join(map(str, test_real_ids))}\n")
+            f.write(f"  all_ids_with_augmented: {', '.join(map(str, test_all_ids))}\n\n")
+
+        f.write("=== AUGMENTED SUMMARY ===\n")
+        f.write(f"augmented_dir: {aug_dir.resolve()}\n")
+        f.write(f"synthetic_ids_found: {len(synthetic_ids_found)}\n")
+        if synthetic_ids_found:
+            f.write(f"synthetic_id_list: {', '.join(map(str, synthetic_ids_found))}\n")
+        else:
+            f.write("synthetic_id_list: none\n")
 
 
-def filter_to_2022(df):
-    return df[df["study_interval"] == 2022].copy()
+def write_split_membership_csv(subject_df, output_csv, aug_dir=AUGMENTED_DATA_DIR):
+    """
+    Writes one row per participant per split.
+    Includes both real and augmented participants.
+    """
+    rng = random.Random(RANDOM_SEED)
+
+    low_ids = sorted(subject_df.loc[subject_df["risk_level"] == "low", "participant_id"].tolist())
+    medium_ids = sorted(subject_df.loc[subject_df["risk_level"] == "medium", "participant_id"].tolist())
+    all_real_ids = sorted(subject_df["participant_id"].tolist())
+
+    risk_map = dict(zip(subject_df["participant_id"], subject_df["risk_level"]))
+    real_to_synthetic, _ = get_augmented_id_map(aug_dir, SYNTHETIC_OFFSET)
+
+    rows = []
+
+    for split in range(1, N_SPLITS + 1):
+        test_real_ids = []
+
+        for group_ids in [low_ids, medium_ids]:
+            ids_copy = group_ids[:]
+            rng.shuffle(ids_copy)
+
+            if len(ids_copy) <= 1:
+                n_test = len(ids_copy)
+            else:
+                n_test = max(1, int(len(ids_copy) * TEST_FRACTION))
+
+            test_real_ids.extend(ids_copy[:n_test])
+
+        test_real_ids = sorted(set(test_real_ids))
+        train_real_ids = sorted([x for x in all_real_ids if x not in test_real_ids])
+
+        for real_id in train_real_ids:
+            rows.append({
+                "split": split,
+                "participant_id": real_id,
+                "source_id": real_id,
+                "is_augmented": False,
+                "set": "train",
+                "risk_level": risk_map[real_id],
+            })
+            for synthetic_id in real_to_synthetic.get(real_id, []):
+                rows.append({
+                    "split": split,
+                    "participant_id": synthetic_id,
+                    "source_id": real_id,
+                    "is_augmented": True,
+                    "set": "train",
+                    "risk_level": risk_map[real_id],
+                })
+
+        for real_id in test_real_ids:
+            rows.append({
+                "split": split,
+                "participant_id": real_id,
+                "source_id": real_id,
+                "is_augmented": False,
+                "set": "test",
+                "risk_level": risk_map[real_id],
+            })
+            for synthetic_id in real_to_synthetic.get(real_id, []):
+                rows.append({
+                    "split": split,
+                    "participant_id": synthetic_id,
+                    "source_id": real_id,
+                    "is_augmented": True,
+                    "set": "test",
+                    "risk_level": risk_map[real_id],
+                })
+
+    pd.DataFrame(rows).sort_values(
+        ["split", "set", "source_id", "is_augmented", "participant_id"]
+    ).to_csv(output_csv, index=False)
 
 
 def main():
     df = pd.read_csv(INPUT_CSV)
 
-    # Use ONLY 2022 data
+    # use only 2022 data
     df = filter_to_2022(df)
-
     df = df.sort_values(["id", "study_interval", "day_in_study"])
 
     interval_results = []
@@ -269,10 +415,12 @@ def main():
 
     subject_notes_df.to_csv(OUTPUT_NOTES_CSV, index=False)
     write_readable_splits(subject_notes_df, OUTPUT_SPLITS_TXT)
+    write_split_membership_csv(subject_notes_df, OUTPUT_SPLIT_MEMBERSHIP_CSV)
 
     print("Saved:")
     print(OUTPUT_NOTES_CSV)
     print(OUTPUT_SPLITS_TXT)
+    print(OUTPUT_SPLIT_MEMBERSHIP_CSV)
 
 
 if __name__ == "__main__":
