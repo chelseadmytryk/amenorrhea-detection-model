@@ -122,7 +122,7 @@ def compute_risk_prob(row, params: dict, prior: float = PRIOR) -> float:
         val = row[feat]
         if pd.isna(val):
             continue
-        # mean -> is mu; and 
+        # mean -> is mu; and std_r -> sigma ^2 (variance)
         log_p_risk += norm.logpdf(val, params[feat]['mean_r'], params[feat]['std_r']) # Calculating Gaussian Likelihood for each feature, uses log-probabilities to avoid num overflow
         log_p_norm += norm.logpdf(val, params[feat]['mean_n'], params[feat]['std_n'])
 
@@ -186,7 +186,7 @@ def evaluate_split(split: dict, split_num: int) -> dict:
 
                 mean_prob = df['risk_prob'].iloc[7:].mean()
                 pred_class  = classify_two_way(mean_prob)
-                pred_binary = 0 if pred_class == 'Green' else 1
+                pred_binary = int(mean_prob >= 0.5)
 
                 y_true_class.append(true_class)
                 y_pred_class.append(pred_class)
