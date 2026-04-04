@@ -3,9 +3,11 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 
 # --- CONFIG ---
-RESULTS_DIR = Path("/Users/natalietsang/Documents/DocumentsLocal/4B_ExtraFiles/MTE546/project/amenorrhea-detection-model/bayesian_risk_results/split2")
+RESULTS_DIR = Path("/Users/lfearn/Documents/546Proj/amenorrhea-detection-model/bayesian_risk_results/split2")
 # Pick a participant to visualize (e.g., an augmented one to see the trend)
-PARTICIPANT_ID = "id_208_daily_features.csv" 
+PARTICIPANT_ID = "id_227_daily_features.csv" 
+# PARTICIPANT_ID = "id_15_study_interval_2022_daily_features.csv"
+OVERALL_RES = Path("/Users/lfearn/Documents/546Proj/amenorrhea-detection-model/bayesian_risk_results/evaluation_summary.csv")
 
 def plot_participant_risk(file_path):
     df = pd.read_csv(file_path)
@@ -38,5 +40,16 @@ def plot_participant_risk(file_path):
     plt.savefig(f"risk_trend_{file_path.name.split('_')[1]}.png")
     plt.show()
 
+def boxplot(file_path):
+    df = pd.read_csv(file_path)
+    print(df)
+    df_aug = df[df['true_binary'] == 1]
+    df_mc = df[df['true_binary'] == 0]
+    plt.boxplot([df_mc['mean_risk_prob'],df_aug['mean_risk_prob']], labels = ['Prob', 'Aug Prob'])
+    plt.title('Prior of mcPHASES and Augmented data')
+    plt.ylabel('Probabilty of Amenorrhea Risk')
+    plt.show()
+
 # Run the plot
 plot_participant_risk(RESULTS_DIR / PARTICIPANT_ID)
+boxplot(OVERALL_RES)

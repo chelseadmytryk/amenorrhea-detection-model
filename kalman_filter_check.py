@@ -3,14 +3,20 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 
 # Path to your successfully filtered ID 6 file
-FILTERED_FILE = Path("/Users/natalietsang/Documents/DocumentsLocal/4B_ExtraFiles/MTE546/project/amenorrhea-detection-model/kalman_filtered_Risky/id_210_daily_features.csv")
+# FILTERED_FILE = Path("C:/Users/lfearn/Documents/546Proj/amenorrhea-detection-model/kalman_filtered/id_48_study_interval_2022_daily_features.csv")
+FILTERED_FILE = Path("C:/Users/lfearn/Documents/546Proj/amenorrhea-detection-model/kalman_filtered_Risky/id_250_daily_features.csv")
+
+
+
+
+#40 2022
 
 df = pd.read_csv(FILTERED_FILE)
 
 fig, ax = plt.subplots(3, 1, figsize=(12, 12), sharex=True)
 
 # 1. HRV Verification
-ax[0].scatter(df['day_in_study'], df['rmssd_avg'], color='gray', alpha=0.3, label='Raw RMSSD (zk)')
+ax[0].scatter(df['day_in_study'], df['rmssd_avg'], color='gray', alpha=0.3, label='Raw HRV (zk)')
 ax[0].plot(df['day_in_study'], df['f_HRV'], color='blue', linewidth=2, label='Filtered HRV (xk)')
 ax[0].set_ylabel('HRV (ms)')
 ax[0].legend()
@@ -28,6 +34,6 @@ ax[2].set_ylabel('Temp Dev (°C)')
 ax[2].set_xlabel('Day in Study')
 ax[2].legend()
 
-plt.suptitle('Kalman Filter State Verification: Participant ID 4')
+plt.suptitle('Kalman Filter State Verification: Participant ID 250')
 plt.tight_layout()
 plt.show()
